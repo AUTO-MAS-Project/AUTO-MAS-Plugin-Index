@@ -1,0 +1,67 @@
+name: 更新插件目录
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+    - cron: '7 0 * * *'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 刷新已知插件、发现新插件或只生成预览
+        type: choice
+        default: refresh
+        options: [refresh, discover, preview]
+permissions:
+  contents: read
+concurrency:
+  group: plugin-index-publisher
+  cancel-in-progress: false
+jobs:
+  update:
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name != 'schedule' || vars.AUTOMAS_PUBLIC_URL != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install uv==0.12.1
+      - run: uv sync --locked
+      - name: 检查后采集
+        env:
+          AUTOMAS_PUBLIC_URL: ${{ vars.AUTOMAS_PUBLIC_URL }}
+          DISCOVER: ${{ github.event.schedule == '7 0 * * *' || inputs.operation == 'discover' }}
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest -q
+          if [ "$DISCOVER" = 'true' ]; then
+            uv run plugin-index --discover
+          else
+            uv run plugin-index
+          fi
+      - name: 发布到数据站
+        if: inputs.operation != 'preview' && vars.AUTOMAS_PUBLIC_URL != ''
+        env:
+          AUTOMAS_TOKEN: ${{ secrets.AUTOMAS_TOKEN }}
+          AUTOMAS_FILE_ID: ${{ vars.AUTOMAS_FILE_ID }}
+          AUTOMAS_PUBLIC_URL: ${{ vars.AUTOMAS_PUBLIC_URL }}
+        run: uv run plugin-index-publish --change-note "GitHub Actions run $GITHUB_RUN_ID"
+      - name: 写入执行结果
+        if: always()
+        env:
+          AUTOMAS_PUBLIC_URL: ${{ vars.AUTOMAS_PUBLIC_URL }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = Path('collect-report.json')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              if not os.environ['AUTOMAS_PUBLIC_URL'] or os.environ['OPERATION'] == 'preview':
+                  stream.write('只生成预览，未发布到数据站。\n')
+              if report.exists():
+                  stream.write('```json\n' + json.dumps(json.loads(report.read_text()), ensure_ascii=False, indent=2) + '\n```\n')
+          PY

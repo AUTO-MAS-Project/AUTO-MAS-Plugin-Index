@@ -1,0 +1,104 @@
+"""现场读取已发布目录，守护完整采集、无变化和元信息修正的可见契约。"""
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from urllib.error import HTTPError
+
+import jsonschema
+import pytest
+
+from plugin_index.collect import collect, load_previous
+from plugin_index.protocol import build_catalog, validate_catalog
+
+
+def test_wire_contract_and_metadata_only_change(catalog, project):
+    """无变化复用原时间；版本不变但文档地址变化时也生成新目录摘要。"""
+    schema = json.loads((Path(__file__).parents[1] / "schema/plugin-index.schema.json").read_text())
+    jsonschema.validate(catalog, schema, format_checker=jsonschema.FormatChecker())
+    document, report = collect(previous=catalog, packages=[], get=lambda _: project)
+    assert document == catalog
+    assert not report["changed"]
+    project["info"]["project_urls"]["Documentation"] = "https://example.org/new-docs"
+    document, report = collect(previous=catalog, packages=[], get=lambda _: project)
+    assert report["changed"]
+    assert document["revision"] != catalog["revision"]
+    assert document["plugins"][0]["docs_url"] == "https://example.org/new-docs"
+    assert document["plugins"][0]["version"] == catalog["plugins"][0]["version"]
+
+
+def test_data_station_is_the_comparison_source(catalog):
+    """每轮从公开地址读取上一版，真实读取失败时不退化为空目录再覆盖数据站。"""
+    calls = []
+
+    def get(url, **kwargs):
+        """记录实际公开读取地址并提供完整已发布目录。"""
+        calls.append(url)
+        return catalog
+
+    assert (
+        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=get) == catalog
+    )
+    assert len(calls) == 1
+
+    def failed(*args, **kwargs):
+        """模拟数据站不可读，禁止将它当作首次初始化。"""
+        raise OSError("offline")
+
+    with pytest.raises(OSError):
+        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=failed)
+
+
+def test_known_failure_does_not_publish_partial_catalog(catalog, project):
+    """已收录插件网络失败时明确中止，即使新发现候选可读也不能发布残缺目录。"""
+    original = deepcopy(catalog)
+
+    def get(url):
+        """让旧插件读取失败，另一个候选合法但不能掩盖旧插件丢失。"""
+        if "/auto-mas-demo/" in url:
+            raise OSError("offline")
+        result = deepcopy(project)
+        result["info"]["name"] = "unprefixed-adapter"
+        result["info"]["keywords"] = "auto-mas-plugin,auto-mas-id:other_adapter"
+        return result
+
+    with pytest.raises(ValueError, match="incomplete"):
+        collect(previous=catalog, packages=["unprefixed-adapter"], get=get)
+    assert catalog == original
+
+
+def test_explicit_removal_and_nonprefix_registration(catalog, project):
+    """真实 404 可移除旧包；补录包不必使用命名前缀，仍须通过完整插件声明校验。"""
+
+    def get(url):
+        """模拟旧插件已下架、新插件通过补录被发现。"""
+        if "/auto-mas-demo/" in url:
+            raise HTTPError(url, 404, "removed", {}, None)
+        result = deepcopy(project)
+        result["info"]["name"] = "unprefixed-adapter"
+        return result
+
+    document, _ = collect(previous=catalog, packages=["unprefixed-adapter"], get=get)
+    assert [entry["package_name"] for entry in document["plugins"]] == ["unprefixed-adapter"]
+
+
+@pytest.mark.parametrize("failure", ["identity", "revision", "schema", "trigger"])
+def test_invalid_document_is_rejected(catalog, failure):
+    """拒绝身份冲突、摘要篡改、未知协议或带可执行配置字段的目录。"""
+    document = deepcopy(catalog)
+    if failure == "identity":
+        document["plugins"].append(deepcopy(document["plugins"][0]))
+    elif failure == "revision":
+        document["plugins"][0]["version"] = "99.0"
+    elif failure == "schema":
+        document["schema_version"] = 2
+    else:
+        document["plugins"][0]["install"] = True
+    with pytest.raises(ValueError):
+        validate_catalog(document)
+
+
+def test_empty_unchanged_catalog_remains_valid():
+    """明确空目录可以发布，后续无变化时保留同一目录，不根据年龄强制刷新。"""
+    document = build_catalog([])
+    assert build_catalog([], previous=document) == document

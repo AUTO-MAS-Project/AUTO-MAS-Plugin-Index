@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AUTO-MAS Plugin Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "revision",
+    "updated_at",
+    "plugins"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "package_name",
+          "plugin_name",
+          "version",
+          "docs_url",
+          "homepage",
+          "repository",
+          "author",
+          "license",
+          "requires_dist",
+          "display_name_i18n",
+          "description_i18n",
+          "tags_i18n"
+        ],
+        "properties": {
+          "package_name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$",
+            "minLength": 1
+          },
+          "plugin_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "docs_url": {
+            "type": "string"
+          },
+          "homepage": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "requires_dist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "display_name_i18n": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "description_i18n": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "tags_i18n": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

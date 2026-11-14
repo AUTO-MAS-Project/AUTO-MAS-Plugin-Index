@@ -27,7 +27,7 @@ uv run plugin-index --discover
 uv run plugin-index-publish
 ```
 
-输出默认位于忽略的 `api/v1/plugins.json`，结果报告为忽略的 `collect-report.json`。本地先设置环境变量，第二条命令才会使用同一公开目录：
+输出默认位于忽略的 `api/v1/plugins.json`，结果报告为忽略的 `collect-report.json`。Actions 将本轮结果保留为 7 天的 `plugin-catalog` 产物供人工查看，下一轮不读取这些产物。本地先设置环境变量，第二条命令才会使用同一公开目录：
 
 ```powershell
 $env:AUTOMAS_PUBLIC_URL = '实际固定公开下载地址'

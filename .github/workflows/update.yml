@@ -42,6 +42,15 @@ jobs:
           else
             uv run plugin-index
           fi
+      - name: 保存本轮预览与诊断产物
+        if: always() && hashFiles('api/v1/plugins.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plugin-catalog
+          path: |
+            api/v1/plugins.json
+            collect-report.json
+          retention-days: 7
       - name: 发布到数据站
         if: inputs.operation != 'preview' && vars.AUTOMAS_PUBLIC_URL != ''
         env:

@@ -147,7 +147,7 @@ def _matches(public_url: str, expected: dict, get) -> bool:
         if error.code == 404:
             return False
         raise
-    return validate_catalog(current) == expected
+    return validate_catalog(current)["revision"] == expected["revision"]
 
 
 def publish(

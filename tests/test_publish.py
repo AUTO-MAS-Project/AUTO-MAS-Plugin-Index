@@ -25,19 +25,23 @@ def response(*, approved=True):
     }
 
 
-def test_unchanged_public_catalog_does_not_upload(catalog):
+@pytest.mark.parametrize("different_timestamp", [False, True])
+def test_unchanged_public_catalog_does_not_upload(catalog, different_timestamp):
     """目录内容一致时不追加版本，判断依据来自公开下载地址而非仓库快照。"""
 
     def upload(*args, **kwargs):
         """任何上传都表示无变化跳过契约被破坏。"""
         pytest.fail("unchanged catalog must not upload")
 
+    live = deepcopy(catalog)
+    if different_timestamp:
+        live["updated_at"] = "2021-01-01T00:00:00+00:00"
     result = publish(
         canonical_bytes(catalog),
         file_id=7,
         public_url=PUBLIC,
         token="secret",
-        get=lambda *args, **kwargs: catalog,
+        get=lambda *args, **kwargs: live,
         upload=upload,
     )
     assert result["state"] == "unchanged"

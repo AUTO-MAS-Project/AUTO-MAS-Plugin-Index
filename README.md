@@ -39,20 +39,22 @@ $env:AUTOMAS_FILE_ID = '实际文件数字 ID'
 
 ## GitHub Actions 与数据站配置
 
-1. 在数据站建立插件目录文件，取得数字文件 ID 和不带版本参数的固定公开下载地址。
+1. 尚未配置公开地址时，先运行一次 `preview`，从 Actions 的 `plugin-catalog` 产物中取出 `api/v1/plugins.json`，用它在数据站创建文件，再取得数字文件 ID 和不带版本参数的固定公开下载地址。首传内容必须是符合协议的插件目录，不能使用其他业务的 JSON 或任意占位文件。
 2. Repository Variables 设置 `AUTOMAS_FILE_ID`、`AUTOMAS_PUBLIC_URL`。
 3. Repository Secret 设置 `AUTOMAS_TOKEN`，使用有权发布该文件版本的 Access Key。上传端会验证实际审核通过并公开，待审核不会报告成功。
 4. 手动运行“更新插件目录”，选择 `preview` 只采集，`refresh` 刷新已知包并发布，`discover` 同时发现新包并发布。首次没有公开目录时自动扫描新候选。
 
 公开地址未配置时，定时任务不运行；手动执行只生成预览。地址已配置但缺少上传凭据或文件 ID 会明确失败。整个工作流只有 `contents: read` 权限，没有生成数据提交、状态分支或自动推送。
 
+若采集阶段提示 `invalid catalog envelope`，先检查公开下载内容是否真的是插件目录：应包含 `schema_version`、`revision`、`updated_at`、`plugins`。维护状态文件中的 `generated_at`、`games` 不属于此协议。已有目标文件误传时，人工将正确目录提交为新版本再重跑；此时尚未调用机器凭据上传，不应放宽校验或把错误内容当作空目录覆盖。
+
 发布复用 Maintenance 的数据站上传与公开回读流程：`POST /api/v1/user/files/{file_id}/versions`，multipart 包含 `file` 和 `change_note`，认证头经 curl 标准输入提供，不写入参数和日志。公开内容一致时跳过上传；POST 不因网络错误自动重试；409 只有公开回读一致才视为成功。上传后回读客户端使用的同一固定地址，确认目录真的可用。
 
 ## 主程序接入
 
-数据站目标就绪后，先将公开下载 URL 注入主程序进程的 `AUTO_MAS_PLUGIN_INDEX_URL`。主程序默认给目录请求 5 秒超时；成功后不再访问 PyPI 或镜像，支持有效 ETag/304 缓存，内容相同保留现有目录条目身份。未配置或读取失败才走原检索兜底，所有远端源失败保留旧目录并报错。
+主程序默认目录地址为 `https://data.auto-mas.top/api/v1/files/auto-mas/Client/plugins/download`，可通过进程变量 `AUTO_MAS_PLUGIN_INDEX_URL` 覆写。目录请求默认 5 秒超时；成功后不再访问 PyPI 或镜像，支持有效 ETag/304 缓存，内容相同保留现有目录条目身份。显式将该变量设为空可仅使用原检索兜底；远端源全部失败时保留旧目录并报错。
 
-正式地址确定后，可再统一为应用交付默认地址；当前没有虚构尚未创建的数据站路由。安装仍由宿主 uv 完成，目录文件不替代安装源、依赖预检或插件启用流程。
+安装仍由宿主 uv 完成，目录文件不替代安装源、依赖预检或插件启用流程。
 
 ## 验证
 

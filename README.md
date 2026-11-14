@@ -50,6 +50,8 @@ $env:AUTOMAS_FILE_ID = '实际文件数字 ID'
 
 发布复用 Maintenance 的数据站上传与公开回读流程：`POST /api/v1/user/files/{file_id}/versions`，multipart 包含 `file` 和 `change_note`，认证头经 curl 标准输入提供，不写入参数和日志。公开内容一致时跳过上传；POST 不因网络错误自动重试；409 只有公开回读一致才视为成功。上传后回读客户端使用的同一固定地址，确认目录真的可用。
 
+上传入口 `data.auto-mas.top` 会重定向到数据节点 `data2.auto-mas.top`。与 Maintenance 一致，curl 使用 `--location-trusted` 在可信数据站的 HTTPS 重定向中保留机器认证头；只有 `--location` 会使跨主机认证头丢失，导致实际节点返回 401。
+
 ## 主程序接入
 
 主程序默认目录地址为 `https://data.auto-mas.top/api/v1/files/auto-mas/Client/plugins/download`，可通过进程变量 `AUTO_MAS_PLUGIN_INDEX_URL` 覆写。目录请求默认 5 秒超时；成功后不再访问 PyPI 或镜像，支持有效 ETag/304 缓存，内容相同保留现有目录条目身份。显式将该变量设为空可仅使用原检索兜底；远端源全部失败时保留旧目录并报错。
@@ -65,5 +67,7 @@ uv run pytest -q
 ```
 
 测试只替换外部 HTTP/上传边界，覆盖跨仓库目录样例、元信息修正、现场比较、部分失败、无变化零上传、上传响应丢失后的重试、待审核结果及损坏文档。无真实上传凭据也能运行。
+
+跨主机重定向回归使用真实 curl 与两个本地 HTTPS 节点，需要系统 curl、openssl；测试证书和密钥仅在临时目录生成。Windows 可先将 Git 的 `usr/bin` 加入 PATH，例如 `$env:PATH='C:\Program Files\Git\usr\bin;'+$env:PATH`。该测试不连接外部数据站，也不使用真实机器凭据。
 
 元数据解析与主程序 `app/plugin/runtime/metadata.py` 保持相同声明语义；线协议与宿主 `app/plugin/runtime/catalog_protocol.py` 通过相同目录 v1 样例验证，变更协议时两边一起验证。上传流程参考 [AUTO-MAS-Maintenance](https://github.com/AUTO-MAS-Project/AUTO-MAS-Maintenance)，保留其成功结果回读机制；状态比较直接读取数据站。

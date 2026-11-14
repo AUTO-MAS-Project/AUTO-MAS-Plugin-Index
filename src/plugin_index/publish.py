@@ -82,6 +82,7 @@ def _upload(url: str, token: str, content: bytes, change_note: str) -> object:
             "--show-error",
             "--fail",
             "--location",
+            "--location-trusted",
             "--max-redirs",
             "5",
             "--proto",
@@ -111,7 +112,8 @@ def _upload(url: str, token: str, content: bytes, change_note: str) -> object:
             url,
         ]
         # Supply Authorization through stdin, keeping the token out of command
-        # arguments and logs. curl forwards it only to the same origin.
+        # arguments and logs. The trusted data-center gateway redirects to its
+        # data node; retain the machine credential across that HTTPS redirect.
         config = "header = " + json.dumps(f"Authorization: Bearer {token}") + "\n"
         try:
             result = subprocess.run(

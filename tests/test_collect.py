@@ -2,14 +2,75 @@
 
 import json
 from copy import deepcopy
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.response import addinfourl
 
 import jsonschema
 import pytest
 
+from plugin_index import http
 from plugin_index.collect import collect, load_previous
 from plugin_index.protocol import build_catalog, validate_catalog
+
+
+def _index_response(url, content_type, body):
+    headers = Message()
+    headers["Content-Type"] = content_type
+    return addinfourl(BytesIO(body), headers, url, 200)
+
+
+def test_discovery_requests_json_and_keeps_known_packages(catalog, project, monkeypatch):
+    """从 JSON 发现新包；总索引暂时缺少已收录包时，仍从单包接口刷新其版本。"""
+    media_type = "application/vnd.pypi.simple.v1+json"
+
+    def read_index(request, *, timeout):
+        assert request.full_url == "https://pypi.org/simple/"
+        assert request.get_header("Accept") == media_type
+        body = json.dumps(
+            {
+                "meta": {"api-version": "1.4"},
+                "projects": [{"name": "Auto_MAS_Fresh"}, {"name": "unrelated-package"}],
+            }
+        ).encode()
+        return _index_response(request.full_url, media_type, body)
+
+    new_project = deepcopy(project)
+    new_project["info"]["name"] = "auto-mas-fresh"
+    new_project["info"]["keywords"] = "auto-mas-plugin,auto-mas-id:fresh"
+    project["info"]["version"] = "9.1.0"
+    responses = {
+        "https://pypi.org/pypi/auto-mas-demo/json": project,
+        "https://pypi.org/pypi/auto-mas-fresh/json": new_project,
+    }
+    monkeypatch.setattr(http, "urlopen", read_index)
+
+    document, _ = collect(previous=catalog, packages=[], discover=True, get=responses.__getitem__)
+
+    assert {item["package_name"]: item["version"] for item in document["plugins"]} == {
+        "auto-mas-demo": "9.1.0",
+        "auto-mas-fresh": catalog["plugins"][0]["version"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body", "error"),
+    [
+        ("text/html", b"<a href='/simple/auto-mas-demo/'>auto-mas-demo</a>", "content type"),
+        ("application/vnd.pypi.simple.v1+json", b'{"projects":{}}', "projects list"),
+    ],
+)
+def test_invalid_index_aborts_discovery(catalog, project, monkeypatch, content_type, body, error):
+    """响应格式错误时终止采集，避免把错误当成没有新包。"""
+    monkeypatch.setattr(
+        http,
+        "urlopen",
+        lambda request, **_: _index_response(request.full_url, content_type, body),
+    )
+    with pytest.raises(ValueError, match=error):
+        collect(previous=catalog, packages=[], discover=True, get=lambda _: project)
 
 
 def test_wire_contract_and_metadata_only_change(catalog, project):

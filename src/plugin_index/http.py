@@ -8,12 +8,28 @@ from urllib.request import Request, urlopen
 from .protocol import MAX_BYTES
 
 
-def get_bytes(url: str, *, limit: int = MAX_BYTES, timeout: int = 30) -> bytes:
-    """读取公开 HTTPS 内容；只对临时 GET 失败重试，不重试真实 404。"""
+def get_bytes(
+    url: str,
+    *,
+    limit: int = MAX_BYTES,
+    timeout: int = 30,
+    content_type: str | None = None,
+) -> bytes:
+    """读取公开 HTTPS 内容；指定类型时要求响应匹配，只对临时 GET 失败重试。"""
+    headers = {"User-Agent": "AUTO-MAS-Plugin-Index/1.0"}
+    if content_type is not None:
+        headers["Accept"] = content_type
     for attempt in range(3):
         try:
-            request = Request(url, headers={"User-Agent": "AUTO-MAS-Plugin-Index/1.0"})
+            request = Request(url, headers=headers)
             with urlopen(request, timeout=timeout) as response:
+                if (
+                    content_type is not None
+                    and (actual_type := response.headers.get_content_type()) != content_type
+                ):
+                    raise ValueError(
+                        f"unexpected content type for {url}: {actual_type}; expected {content_type}"
+                    )
                 content = response.read(limit + 1)
             if len(content) > limit:
                 raise ValueError("response exceeds size limit")
@@ -28,6 +44,13 @@ def get_bytes(url: str, *, limit: int = MAX_BYTES, timeout: int = 30) -> bytes:
     raise RuntimeError("GET attempts exhausted")
 
 
-def get_json(url: str, *, timeout: int = 30) -> object:
+def get_json(
+    url: str,
+    *,
+    limit: int = MAX_BYTES,
+    timeout: int = 30,
+    content_type: str | None = None,
+) -> object:
     """读取受大小限制的 UTF-8 JSON，保留 HTTP 错误供调用者区分未发布和读取失败。"""
-    return json.loads(get_bytes(url, timeout=timeout).decode("utf-8-sig"))
+    content = get_bytes(url, limit=limit, timeout=timeout, content_type=content_type)
+    return json.loads(content.decode("utf-8-sig"))

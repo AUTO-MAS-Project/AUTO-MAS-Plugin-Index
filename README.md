@@ -4,7 +4,7 @@
 
 ## 数据流
 
-每次执行直接读取 `AUTOMAS_PUBLIC_URL` 的公开目录，取得已收录包及上次有效内容，再向 PyPI 查询发行元信息。默认每 30 分钟检查已知插件，每天 UTC 00:07（北京时间 08:07）扫描一次新候选。GitHub 定时任务可能延迟；Actions 可手动选择 `discover` 立即扫描。
+每次执行直接读取 `AUTOMAS_PUBLIC_URL` 的公开目录，取得已收录包及上次有效内容，再向 PyPI 查询发行元信息。默认每 30 分钟检查已知插件，每天 UTC 00:07（北京时间 08:07）通过 PyPI Simple API 的 JSON 总索引扫描一次新候选。GitHub 定时任务可能延迟；Actions 可手动选择 `discover` 立即扫描。
 
 `config/packages.json` 补录包名，可使用任意名称；准入依据始终是发行元数据中的 `auto-mas-plugin`、唯一 `auto-mas-id:` 和 README 开头完整的 `auto-mas:i18n` 声明。不会安装或执行插件。随主程序提供的 core SDK 不进入市场目录。
 

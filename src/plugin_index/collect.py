@@ -1,22 +1,21 @@
 """直接读取数据站现有目录，采集 PyPI 元信息并生成需要发布的完整结果。"""
 
 import argparse
-import html
 import json
 import logging
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 
-from .http import get_bytes, get_json
+from .http import get_json
 from .metadata import parse_project
 from .protocol import build_catalog, package_key, validate_catalog, write_document
 
 PYPI = "https://pypi.org"
+_SIMPLE_JSON = "application/vnd.pypi.simple.v1+json"
 log = logging.getLogger(__name__)
 
 
@@ -37,11 +36,20 @@ def load_previous(public_url: str, *, get=get_json) -> dict | None:
 
 def discover_packages() -> list[str]:
     """扫描 PyPI 总索引的名称启发候选；最终准入仍由插件声明决定，允许配置补录任意包名。"""
-    content = get_bytes(f"{PYPI}/simple/", limit=128 * 1024 * 1024, timeout=60).decode("utf-8")
-    names = {html.unescape(name).strip() for name in re.findall(r">([^<]+)</a>", content)}
-    return sorted(
-        name for name in names if any(hint in package_key(name) for hint in ("automas", "auto-mas"))
+    payload = get_json(
+        f"{PYPI}/simple/", limit=128 * 1024 * 1024, timeout=60, content_type=_SIMPLE_JSON
     )
+    if not isinstance(payload, dict) or not isinstance(projects := payload.get("projects"), list):
+        raise ValueError("PyPI Simple JSON index missing projects list")
+
+    names: set[str] = set()
+    for project in projects:
+        name = project.get("name") if isinstance(project, dict) else None
+        if not isinstance(name, str) or not (name := name.strip()):
+            raise ValueError("PyPI Simple JSON index has invalid project name")
+        if any(hint in package_key(name) for hint in ("automas", "auto-mas")):
+            names.add(name)
+    return sorted(names)
 
 
 def collect(

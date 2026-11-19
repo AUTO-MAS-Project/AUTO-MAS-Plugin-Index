@@ -12,7 +12,7 @@ import jsonschema
 import pytest
 
 from plugin_index import http
-from plugin_index.collect import collect, load_previous
+from plugin_index.collect import collect, read_public_catalog
 from plugin_index.protocol import build_catalog, validate_catalog
 
 
@@ -98,7 +98,8 @@ def test_data_station_is_the_comparison_source(catalog):
         return catalog
 
     assert (
-        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=get) == catalog
+        read_public_catalog("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=get)
+        == catalog
     )
     assert len(calls) == 1
 
@@ -107,7 +108,7 @@ def test_data_station_is_the_comparison_source(catalog):
         raise OSError("offline")
 
     with pytest.raises(OSError):
-        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=failed)
+        read_public_catalog("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=failed)
 
 
 def test_known_failure_does_not_publish_partial_catalog(catalog, project):
@@ -152,14 +153,75 @@ def test_invalid_document_is_rejected(catalog, failure):
     elif failure == "revision":
         document["plugins"][0]["version"] = "99.0"
     elif failure == "schema":
-        document["schema_version"] = 2
+        document["schema_version"] = 1
     else:
         document["plugins"][0]["install"] = True
     with pytest.raises(ValueError):
         validate_catalog(document)
 
 
+def test_rebuild_drops_removed_discovered_package(project):
+    """明确下架的旧候选可从重建结果移除，新包仍按正常发布记录收录。"""
+
+    def get(url):
+        if "/removed/" in url:
+            raise HTTPError(url, 404, "removed", {}, None)
+        return project
+
+    document, _ = collect(
+        previous=None, known_packages=("removed",), packages=[project["info"]["name"]], get=get
+    )
+    assert [item["package_name"] for item in document["plugins"]] == [project["info"]["name"]]
+
+
 def test_empty_unchanged_catalog_remains_valid():
     """明确空目录可以发布，后续无变化时保留同一目录，不根据年龄强制刷新。"""
     document = build_catalog([])
     assert build_catalog([], previous=document) == document
+
+
+def test_collects_only_recent_published_notes_and_retains_them_on_failure(project):
+    """以 PyPI 版本而非章节数量截取五版，保持身份、正文修正和网络失败时的日志一致。"""
+    project["info"].update(version="1.10")
+    project["info"]["project_urls"]["Changelog"] = "https://example.org/CHANGELOG.md"
+    versions = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.10", "2.0"]
+    project["releases"] = {version: [{"filename": "dist.whl"}] for version in versions}
+    source = """## [Unreleased]
+pending
+## [2.0]
+future
+## [1.10] - 2026-11-19
+### Changed
+- first
+## [1.5]
+- second
+## [1.1]
+too old
+"""
+
+    def refresh(previous, fetch):
+        return collect(
+            previous=previous,
+            packages=[project["info"]["name"]],
+            get=lambda _: project,
+            fetch_notes=fetch,
+        )[0]
+
+    first = refresh(None, lambda _: source)
+    expected = [
+        {"version": "1.10", "body": "### Changed\n- first"},
+        {"version": "1.5", "body": "- second"},
+    ]
+    assert first["plugins"][0]["changelog"] == expected
+    edited = refresh(first, lambda _: source.replace("- second", "- corrected"))
+    assert edited["revision"] != first["revision"]
+    project["info"]["version"] = "2.0"
+
+    def unavailable(_):
+        raise OSError("offline")
+
+    fallback = refresh(edited, unavailable)["plugins"][0]
+    assert fallback["version"] == "2.0"
+    assert fallback["changelog"] == [expected[0], {"version": "1.5", "body": "- corrected"}]
+    del project["info"]["project_urls"]["Changelog"]
+    assert refresh(edited, unavailable)["plugins"][0]["changelog"] == []

@@ -8,9 +8,9 @@ import pytest
 
 @pytest.fixture
 def catalog():
-    """加载与主程序共用的目录 v1 样例，校验双方对完整元信息和内容摘要的理解。"""
+    """加载与主程序共用的目录 v2 样例，校验双方对完整元信息和内容摘要的理解。"""
     return json.loads(
-        (Path(__file__).parent / "fixtures/catalog-v1.json").read_text(encoding="utf-8")
+        (Path(__file__).parent / "fixtures/catalog-v2.json").read_text(encoding="utf-8")
     )
 
 

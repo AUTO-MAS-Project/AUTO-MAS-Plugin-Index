@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 
 from .http import get_json
-from .protocol import MAX_BYTES, validate_catalog
+from .protocol import MAX_BYTES, rebuild_inputs, validate_catalog
 
 DEFAULT_BASE_URL = "https://data.auto-mas.top"
 log = logging.getLogger(__name__)
@@ -141,14 +141,20 @@ def _upload(url: str, token: str, content: bytes, change_note: str) -> object:
     return json.loads(raw.decode("utf-8-sig"))
 
 
-def _matches(public_url: str, expected: dict, get) -> bool:
+def _matches(public_url: str, expected: dict, get, replace_revision: str | None = None) -> bool:
     """现场比较公开目录；首次 404 可上传，读取失败时不猜测内容已变化。"""
     try:
         current = get(public_url, timeout=10)
     except HTTPError as error:
-        if error.code == 404:
+        if error.code == 404 and replace_revision is None:
             return False
         raise
+    if replace_revision is not None:
+        current_revision, _ = rebuild_inputs(current)
+        if current_revision == replace_revision and current_revision != expected["revision"]:
+            return False
+        if current_revision != expected["revision"]:
+            raise PublishError("public catalog changed since rebuild; regenerate before uploading")
     return validate_catalog(current)["revision"] == expected["revision"]
 
 
@@ -160,6 +166,7 @@ def publish(
     token: str,
     base_url: str = DEFAULT_BASE_URL,
     change_note: str = "AUTO-MAS plugin catalog",
+    replace_revision: str | None = None,
     get=get_json,
     upload=_upload,
     sleep=time.sleep,
@@ -171,7 +178,7 @@ def publish(
     if len(content) > MAX_BYTES:
         raise PublishError("status document exceeds size limit")
     expected = validate_catalog(json.loads(content.decode("utf-8-sig")))
-    if _matches(public_url, expected, get):
+    if _matches(public_url, expected, get, replace_revision):
         return {"state": "unchanged", "public_url": public_url}
 
     version_no = None
@@ -220,7 +227,7 @@ def publish(
     # Check the same stable URL clients use, without a cache-busting query.
     # A CDN still serving an old version must not be reported as synchronized.
     for attempt in range(6):
-        if _matches(public_url, expected, get):
+        if _matches(public_url, expected, get, replace_revision):
             return {"state": "published", "version_no": version_no, "public_url": public_url}
         if attempt < 5:
             sleep(5)
@@ -239,6 +246,7 @@ def main() -> int:
     parser.add_argument("--file-id", type=int, default=os.environ.get("AUTOMAS_FILE_ID") or None)
     parser.add_argument("--public-url", default=os.environ.get("AUTOMAS_PUBLIC_URL", ""))
     parser.add_argument("--change-note", default="AUTO-MAS plugin catalog")
+    parser.add_argument("--replace-revision", help="仅替换本次全量重建读取的目录")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
@@ -253,6 +261,7 @@ def main() -> int:
             token=os.environ.get("AUTOMAS_TOKEN", ""),
             base_url=args.base_url,
             change_note=args.change_note,
+            replace_revision=args.replace_revision,
         )
     except (OSError, ValueError, TypeError) as exc:
         # Exception text from socket/TLS implementations could contain request

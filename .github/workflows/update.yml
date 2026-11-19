@@ -9,7 +9,7 @@ on:
         description: 刷新已知插件、发现新插件或只生成预览
         type: choice
         default: refresh
-        options: [refresh, discover, preview]
+        options: [refresh, discover, preview, rebuild]
 permissions:
   contents: read
 concurrency:
@@ -32,12 +32,15 @@ jobs:
       - name: 检查后采集
         env:
           AUTOMAS_PUBLIC_URL: ${{ vars.AUTOMAS_PUBLIC_URL }}
+          REBUILD: ${{ inputs.operation == 'rebuild' }}
           DISCOVER: ${{ github.event.schedule == '7 0 * * *' || inputs.operation == 'discover' }}
         run: |
           uv run ruff check .
           uv run ruff format --check .
           uv run pytest -q
-          if [ "$DISCOVER" = 'true' ]; then
+          if [ "$REBUILD" = 'true' ]; then
+            uv run plugin-index --rebuild --discover
+          elif [ "$DISCOVER" = 'true' ]; then
             uv run plugin-index --discover
           else
             uv run plugin-index
@@ -57,7 +60,11 @@ jobs:
           AUTOMAS_TOKEN: ${{ secrets.AUTOMAS_TOKEN }}
           AUTOMAS_FILE_ID: ${{ vars.AUTOMAS_FILE_ID }}
           AUTOMAS_PUBLIC_URL: ${{ vars.AUTOMAS_PUBLIC_URL }}
-        run: uv run plugin-index-publish --change-note "GitHub Actions run $GITHUB_RUN_ID"
+        run: |
+          args=()
+          revision=$(jq -r '.source_revision // empty' collect-report.json)
+          if [ -n "$revision" ]; then args+=(--replace-revision "$revision"); fi
+          uv run plugin-index-publish "${args[@]}" --change-note "GitHub Actions run $GITHUB_RUN_ID"
       - name: 写入执行结果
         if: always()
         env:

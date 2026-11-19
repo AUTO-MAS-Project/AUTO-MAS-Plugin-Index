@@ -1,4 +1,4 @@
-"""插件目录 v1 线协议；宿主与生成器通过相同样例校验契约。"""
+"""插件目录 v2 线协议；宿主与生成器通过相同样例校验契约。"""
 
 import hashlib
 import json
@@ -7,6 +7,9 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
+from packaging.version import Version
+
+PLUGIN_ID_PATTERN = re.compile(r'(?!\.{1,2}$)[^/\\:*?"<>|\s\x00-\x1f]+')
 MAX_BYTES = 8 * 1024 * 1024
 TEXT_FIELDS = (
     "package_name",
@@ -18,7 +21,14 @@ TEXT_FIELDS = (
     "author",
     "license",
 )
-ENTRY_FIELDS = {*TEXT_FIELDS, "requires_dist", "display_name_i18n", "description_i18n", "tags_i18n"}
+ENTRY_FIELDS = {
+    *TEXT_FIELDS,
+    "changelog",
+    "requires_dist",
+    "display_name_i18n",
+    "description_i18n",
+    "tags_i18n",
+}
 
 
 def package_key(name: str) -> str:
@@ -41,13 +51,13 @@ def validate_entries(raw: object) -> list[dict]:
     entries = []
     for item in raw:
         if not isinstance(item, dict) or set(item) != ENTRY_FIELDS:
-            raise ValueError("plugin fields do not match catalog v1")
+            raise ValueError("plugin fields do not match catalog v2")
         if any(not isinstance(item[field], str) for field in TEXT_FIELDS):
             raise ValueError("plugin text fields must be strings")
         package, identity = item["package_name"], item["plugin_name"]
         if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", package):
             raise ValueError("invalid package name")
-        if not identity or "/" in identity or any(char.isspace() for char in identity):
+        if not PLUGIN_ID_PATTERN.fullmatch(identity):
             raise ValueError("invalid plugin identity")
         if identity == "auto_mas_core" or not item["version"].strip():
             raise ValueError("core is not a market plugin; version must be nonempty")
@@ -55,6 +65,21 @@ def validate_entries(raw: object) -> list[dict]:
             raise ValueError("duplicate package or plugin identity")
         packages.add(package_key(package))
         identities.add(identity)
+        notes = item["changelog"]
+        if not isinstance(notes, list) or len(notes) > 5:
+            raise ValueError("changelog must contain at most five releases")
+        previous_version = None
+        for note in notes:
+            if not isinstance(note, dict) or set(note) != {"version", "body"}:
+                raise ValueError("invalid changelog entry")
+            if not all(isinstance(value, str) and value.strip() for value in note.values()):
+                raise ValueError("empty changelog version or body")
+            version = Version(note["version"])
+            if version > Version(item["version"]) or (
+                previous_version is not None and version >= previous_version
+            ):
+                raise ValueError("changelog must contain published versions in descending order")
+            previous_version = version
         requirements = item["requires_dist"]
         if not isinstance(requirements, list) or not all(isinstance(v, str) for v in requirements):
             raise ValueError("requires_dist must be a list of strings")
@@ -74,9 +99,36 @@ def validate_entries(raw: object) -> list[dict]:
     return sorted(entries, key=lambda item: package_key(item["package_name"]))
 
 
-def content_revision(entries: list[dict]) -> str:
+def content_revision(entries: list[dict], *, schema_version: int = 2) -> str:
     """只计算协议版本和插件业务内容的摘要，不将轮询时间作为变更。"""
-    return hashlib.sha256(canonical_bytes({"schema_version": 1, "plugins": entries})).hexdigest()
+    return hashlib.sha256(
+        canonical_bytes({"schema_version": schema_version, "plugins": entries})
+    ).hexdigest()
+
+
+def rebuild_inputs(raw: dict) -> tuple[str, list[str]]:
+    """全量重建只继承已知包名，验证来源摘要，不解释或沿用旧条目字段。"""
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("plugins"), list)
+        or type(raw.get("schema_version")) is not int
+        or raw["schema_version"] not in (1, 2)
+    ):
+        raise ValueError("invalid rebuild source")
+    entries = raw["plugins"]
+    revision = content_revision(entries, schema_version=raw["schema_version"])
+    if raw.get("revision") != revision:
+        raise ValueError("invalid rebuild source revision")
+    names = []
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(name := entry.get("package_name"), str)
+            or not name
+        ):
+            raise ValueError("invalid rebuild source package")
+        names.append(name)
+    return revision, names
 
 
 def validate_catalog(raw: object) -> dict:
@@ -88,7 +140,7 @@ def validate_catalog(raw: object) -> dict:
         "plugins",
     }:
         raise ValueError("invalid catalog envelope")
-    if type(raw["schema_version"]) is not int or raw["schema_version"] != 1:
+    if type(raw["schema_version"]) is not int or raw["schema_version"] != 2:
         raise ValueError("unsupported catalog schema version")
     if not isinstance(raw["updated_at"], str):
         raise ValueError("updated_at must be a timestamp")
@@ -114,7 +166,7 @@ def build_catalog(
     stamp = now or datetime.now(UTC)
     return validate_catalog(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "revision": revision,
             "updated_at": stamp.isoformat(),
             "plugins": entries,

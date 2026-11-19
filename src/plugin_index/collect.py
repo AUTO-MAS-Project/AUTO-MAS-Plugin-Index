@@ -35,7 +35,10 @@ def read_public_catalog(public_url: str, *, get=get_json) -> dict | None:
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("public URL must be an HTTPS URL without credentials")
     try:
-        return get(public_url, timeout=10)
+        document = get(public_url, timeout=10)
+        if not isinstance(document, dict):
+            raise ValueError("invalid catalog envelope")
+        return document
     except HTTPError as error:
         if error.code == 404:
             return None
@@ -64,6 +67,7 @@ def collect(
     *,
     previous: dict | None,
     packages: list[str],
+    known_packages: tuple[str, ...] = (),
     discover: bool = False,
     get=get_json,
     discovery=discover_packages,
@@ -81,7 +85,7 @@ def collect(
     prior_entries = {
         package_key(item["package_name"]): item for item in (previous or {}).get("plugins", [])
     }
-    known = prior_entries.keys()
+    known = prior_entries.keys() | {package_key(name) for name in known_packages}
     names = configured | known
     if discover:
         names.update(package_key(name) for name in discovery())
@@ -146,14 +150,16 @@ def main() -> int:
         previous = read_public_catalog(args.public_url)
         packages = json.loads(args.packages.read_text(encoding="utf-8"))
         source_revision = None
+        known_packages = ()
         if args.rebuild and previous is not None:
-            source_revision, known_packages = rebuild_inputs(previous)
+            source_revision, old_names = rebuild_inputs(previous)
             if previous["schema_version"] != 2:
-                packages = [*packages, *known_packages]
+                known_packages = tuple(old_names)
                 previous = None
         document, report = collect(
             previous=previous,
             packages=packages,
+            known_packages=known_packages,
             discover=args.rebuild or args.discover or previous is None,
         )
         if source_revision is not None:

@@ -160,6 +160,20 @@ def test_invalid_document_is_rejected(catalog, failure):
         validate_catalog(document)
 
 
+def test_rebuild_drops_removed_discovered_package(project):
+    """明确下架的旧候选可从重建结果移除，新包仍按正常发布记录收录。"""
+
+    def get(url):
+        if "/removed/" in url:
+            raise HTTPError(url, 404, "removed", {}, None)
+        return project
+
+    document, _ = collect(
+        previous=None, known_packages=("removed",), packages=[project["info"]["name"]], get=get
+    )
+    assert [item["package_name"] for item in document["plugins"]] == [project["info"]["name"]]
+
+
 def test_empty_unchanged_catalog_remains_valid():
     """明确空目录可以发布，后续无变化时保留同一目录，不根据年龄强制刷新。"""
     document = build_catalog([])

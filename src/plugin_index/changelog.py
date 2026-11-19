@@ -56,6 +56,11 @@ def fetch_markdown(url: str) -> str:
                     continue
                 if response.status != 200:
                     raise ValueError(f"changelog returned HTTP {response.status}")
+                if (
+                    response.headers.get("Content-Type", "").partition(";")[0].strip().lower()
+                    == "text/html"
+                ):
+                    raise ValueError("changelog returned an HTML page")
                 data = response.read(MAX_MARKDOWN_BYTES + 1, decode_content=False)
                 if len(data) > MAX_MARKDOWN_BYTES:
                     raise ValueError("changelog exceeds size limit")

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from packaging.version import Version
 
+PLUGIN_ID_PATTERN = re.compile(r'(?!\.{1,2}$)[^/\\:*?"<>|\s\x00-\x1f]+')
 MAX_BYTES = 8 * 1024 * 1024
 TEXT_FIELDS = (
     "package_name",
@@ -56,7 +57,7 @@ def validate_entries(raw: object) -> list[dict]:
         package, identity = item["package_name"], item["plugin_name"]
         if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", package):
             raise ValueError("invalid package name")
-        if not identity or "/" in identity or any(char.isspace() for char in identity):
+        if not PLUGIN_ID_PATTERN.fullmatch(identity):
             raise ValueError("invalid plugin identity")
         if identity == "auto_mas_core" or not item["version"].strip():
             raise ValueError("core is not a market plugin; version must be nonempty")
@@ -98,9 +99,36 @@ def validate_entries(raw: object) -> list[dict]:
     return sorted(entries, key=lambda item: package_key(item["package_name"]))
 
 
-def content_revision(entries: list[dict]) -> str:
+def content_revision(entries: list[dict], *, schema_version: int = 2) -> str:
     """只计算协议版本和插件业务内容的摘要，不将轮询时间作为变更。"""
-    return hashlib.sha256(canonical_bytes({"schema_version": 2, "plugins": entries})).hexdigest()
+    return hashlib.sha256(
+        canonical_bytes({"schema_version": schema_version, "plugins": entries})
+    ).hexdigest()
+
+
+def rebuild_inputs(raw: dict) -> tuple[str, list[str]]:
+    """全量重建只继承已知包名，验证来源摘要，不解释或沿用旧条目字段。"""
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("plugins"), list)
+        or type(raw.get("schema_version")) is not int
+        or raw["schema_version"] not in (1, 2)
+    ):
+        raise ValueError("invalid rebuild source")
+    entries = raw["plugins"]
+    revision = content_revision(entries, schema_version=raw["schema_version"])
+    if raw.get("revision") != revision:
+        raise ValueError("invalid rebuild source revision")
+    names = []
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(name := entry.get("package_name"), str)
+            or not name
+        ):
+            raise ValueError("invalid rebuild source package")
+        names.append(name)
+    return revision, names
 
 
 def validate_catalog(raw: object) -> dict:

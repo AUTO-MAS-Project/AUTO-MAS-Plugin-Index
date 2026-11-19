@@ -114,3 +114,36 @@ def test_unreadable_data_station_does_not_start_upload(catalog):
             get=get,
             upload=upload,
         )
+
+
+def test_publish_rebuilt_catalog_to_same_file(catalog):
+    """原地址从已校验的旧摘要切换到 v2，重复执行识别为已发布。"""
+    from plugin_index.protocol import content_revision, rebuild_inputs
+
+    old = deepcopy(catalog)
+    old["schema_version"] = 1
+    del old["plugins"][0]["changelog"]
+    old["revision"] = content_revision(old["plugins"], schema_version=1)
+    revision, names = rebuild_inputs(old)
+    assert names == [catalog["plugins"][0]["package_name"]]
+    live = [old]
+    uploads = []
+
+    def upload(url, token, content, note):
+        live[0] = catalog
+        uploads.append(url)
+        return response()
+
+    kwargs = dict(
+        file_id=7,
+        public_url=PUBLIC,
+        token="secret",
+        get=lambda *args, **kw: live[0],
+        upload=upload,
+        sleep=lambda _: None,
+        replace_revision=revision,
+    )
+    payload = canonical_bytes(catalog)
+    assert publish(payload, **kwargs)["state"] == "published"
+    assert publish(payload, **kwargs)["state"] == "unchanged"
+    assert len(uploads) == 1

@@ -13,14 +13,21 @@ from urllib.parse import quote, urlsplit
 from .changelog import fetch_markdown, release_notes
 from .http import get_json
 from .metadata import parse_project
-from .protocol import build_catalog, package_key, validate_catalog, write_document
+from .protocol import (
+    build_catalog,
+    package_key,
+    rebuild_inputs,
+    validate_catalog,
+    validate_entries,
+    write_document,
+)
 
 PYPI = "https://pypi.org"
 _SIMPLE_JSON = "application/vnd.pypi.simple.v1+json"
 log = logging.getLogger(__name__)
 
 
-def load_previous(public_url: str, *, get=get_json) -> dict | None:
+def read_public_catalog(public_url: str, *, get=get_json) -> dict | None:
     """现场读取数据站目录作为唯一比较基准；首次 404 可初始化，其他读取失败阻止覆盖。"""
     if not public_url:
         return None
@@ -28,7 +35,7 @@ def load_previous(public_url: str, *, get=get_json) -> dict | None:
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("public URL must be an HTTPS URL without credentials")
     try:
-        return validate_catalog(get(public_url, timeout=10))
+        return get(public_url, timeout=10)
     except HTTPError as error:
         if error.code == 404:
             return None
@@ -98,6 +105,7 @@ def collect(
                 prior["changelog"] if prior and prior["plugin_name"] == draft["plugin_name"] else []
             )
             draft["changelog"] = release_notes(link, payload, history, fetch=fetch_notes)
+            validate_entries([draft])
             return name, draft, None
         except HTTPError as error:
             if error.code == 404 and name not in configured:
@@ -131,15 +139,25 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("api/v1/plugins.json"))
     parser.add_argument("--report", type=Path, default=Path("collect-report.json"))
     parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--rebuild", action="store_true", help="重新采集线上已知包和发现的包")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     try:
-        previous = load_previous(args.public_url)
+        previous = read_public_catalog(args.public_url)
+        packages = json.loads(args.packages.read_text(encoding="utf-8"))
+        source_revision = None
+        if args.rebuild and previous is not None:
+            source_revision, known_packages = rebuild_inputs(previous)
+            if previous["schema_version"] != 2:
+                packages = [*packages, *known_packages]
+                previous = None
         document, report = collect(
             previous=previous,
-            packages=json.loads(args.packages.read_text(encoding="utf-8")),
-            discover=args.discover or previous is None,
+            packages=packages,
+            discover=args.rebuild or args.discover or previous is None,
         )
+        if source_revision is not None:
+            report["source_revision"] = source_revision
         write_document(args.output, document)
         write_document(args.report, report)
     except (OSError, ValueError, TypeError) as error:

@@ -177,7 +177,7 @@ def _view(
 
 
 def parse_project(payload: dict) -> tuple[dict, str] | None:
-    """将公开发行元数据转换为目录 v1 条目，缺少市场声明时跳过候选。"""
+    """将公开发行元数据转换为目录 v2 条目，缺少市场声明时跳过候选。"""
     view = _view(payload)
     if view is None or view["display_metadata"] is None:
         return None

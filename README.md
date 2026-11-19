@@ -39,7 +39,7 @@ $env:AUTOMAS_FILE_ID = '实际文件数字 ID'
 
 ## GitHub Actions 与数据站配置
 
-首次切换到 v2 时，运行 `uv run plugin-index --public-url "" --discover` 全量生成目录，在数据站将生成的 `api/v1/plugins.json` 上传为现有文件的新版本。文件 ID 和公开下载地址沿用原值，后续按原计划定时刷新。
+首次切换到 v2 时，手动运行“更新插件目录”并选择 `rebuild`。工作流校验线上目录摘要，从已收录包名和 PyPI 发现结果全量生成 v2，上传为原文件的新版本，并在同一公开地址回读。重建期间若线上目录已变化，重新执行即可。
 
 1. 尚未配置公开地址时，先运行一次 `preview`，从 Actions 的 `plugin-catalog` 产物中取出 `api/v1/plugins.json`，用它在数据站创建文件，再取得数字文件 ID 和不带版本参数的固定公开下载地址。首传内容必须是符合协议的插件目录，不能使用其他业务的 JSON 或任意占位文件。
 2. Repository Variables 设置 `AUTOMAS_FILE_ID`、`AUTOMAS_PUBLIC_URL`。
@@ -72,4 +72,4 @@ uv run pytest -q
 
 跨主机重定向回归使用真实 curl 与两个本地 HTTPS 节点，需要系统 curl、openssl；测试证书和密钥仅在临时目录生成。Windows 可先将 Git 的 `usr/bin` 加入 PATH，例如 `$env:PATH='C:\Program Files\Git\usr\bin;'+$env:PATH`。该测试不连接外部数据站，也不使用真实机器凭据。
 
-元数据解析与主程序 `app/plugin/runtime/metadata.py` 保持相同声明语义；线协议与宿主 `app/plugin/runtime/catalog_protocol.py` 通过相同目录 v1 样例验证，变更协议时两边一起验证。上传流程参考 [AUTO-MAS-Maintenance](https://github.com/AUTO-MAS-Project/AUTO-MAS-Maintenance)，保留其成功结果回读机制；状态比较直接读取数据站。
+元数据解析与主程序 `app/plugin/runtime/metadata.py` 保持相同声明语义；线协议与宿主 `app/plugin/runtime/catalog_protocol.py` 通过相同目录 v2 样例验证，变更协议时两边一起验证。上传流程参考 [AUTO-MAS-Maintenance](https://github.com/AUTO-MAS-Project/AUTO-MAS-Maintenance)，保留其成功结果回读机制；状态比较直接读取数据站。

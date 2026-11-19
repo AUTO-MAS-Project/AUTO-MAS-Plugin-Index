@@ -12,7 +12,7 @@ import jsonschema
 import pytest
 
 from plugin_index import http
-from plugin_index.collect import collect, load_previous
+from plugin_index.collect import collect, read_public_catalog
 from plugin_index.protocol import build_catalog, validate_catalog
 
 
@@ -98,7 +98,8 @@ def test_data_station_is_the_comparison_source(catalog):
         return catalog
 
     assert (
-        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=get) == catalog
+        read_public_catalog("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=get)
+        == catalog
     )
     assert len(calls) == 1
 
@@ -107,7 +108,7 @@ def test_data_station_is_the_comparison_source(catalog):
         raise OSError("offline")
 
     with pytest.raises(OSError):
-        load_previous("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=failed)
+        read_public_catalog("https://data.auto-mas.top/api/v1/files/a/b/c/download", get=failed)
 
 
 def test_known_failure_does_not_publish_partial_catalog(catalog, project):

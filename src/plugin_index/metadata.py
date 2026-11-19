@@ -9,7 +9,7 @@ import string
 from email.message import Message
 from typing import Any, TypedDict
 
-from .protocol import TEXT_FIELDS, validate_entries
+from .protocol import TEXT_FIELDS
 
 MARKET_GATE_TAG = "auto-mas-plugin"
 PLUGIN_ID_TAG_PREFIX = "auto-mas-id:"
@@ -159,6 +159,7 @@ def _view(
         "version": version,
         "summary": summary,
         "docs_url": docs_url,
+        "changelog_url": urls.get("changelog", ""),
         "homepage": homepage,
         "repository": next(
             (
@@ -175,7 +176,7 @@ def _view(
     }
 
 
-def parse_project(payload: dict) -> dict | None:
+def parse_project(payload: dict) -> tuple[dict, str] | None:
     """将公开发行元数据转换为目录 v1 条目，缺少市场声明时跳过候选。"""
     view = _view(payload)
     if view is None or view["display_metadata"] is None:
@@ -184,4 +185,4 @@ def parse_project(payload: dict) -> dict | None:
         return None
     entry = {key: view[key] for key in TEXT_FIELDS}
     entry.update(requires_dist=view["requires_dist"], **view["display_metadata"])
-    return validate_entries([entry])[0]
+    return entry, view["changelog_url"]

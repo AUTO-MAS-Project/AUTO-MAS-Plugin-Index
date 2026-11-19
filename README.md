@@ -8,7 +8,7 @@
 
 `config/packages.json` 补录包名，可使用任意名称；准入依据始终是发行元数据中的 `auto-mas-plugin`、唯一 `auto-mas-id:` 和 README 开头完整的 `auto-mas:i18n` 声明。不会安装或执行插件。随主程序提供的 core SDK 不进入市场目录。
 
-目录包含包名、插件标识、版本、文档/主页/仓库地址、作者、许可证、依赖和名称/简介/标签的多语言映射，协议见 [schema/plugin-index.schema.json](schema/plugin-index.schema.json)。当前版本为 `schema_version=1`。
+目录包含包名、插件标识、版本、文档/主页/仓库地址、作者、许可证、依赖和名称/简介/标签的多语言映射，协议见 [schema/plugin-index.schema.json](schema/plugin-index.schema.json)。每项的 `changelog` 保存目标版本及之前最近五个 PyPI 发行版本内的说明。采集器从项目元数据的 `Changelog` 链接读取 Markdown，以 `## [版本] - 日期` 分段；文件读取失败时仅保留同一插件且仍在窗口内的旧说明，缺少链接则留空。当前版本为 `schema_version=2`。
 
 `revision` 是协议版本和规范化插件内容的 SHA-256，不包含轮询时间。版本号未变但链接、简介或语言资源变化也会生成新摘要。内容相同时复用公开文档及其 `updated_at`，不创建新数据站版本。目录不因长期未更新而过期。
 
@@ -18,7 +18,7 @@
 
 ## 本地使用
 
-Python 3.12+、uv；发布另需系统 curl。运行依赖仅标准库。
+Python 3.12+、uv；发布另需系统 curl。依赖由 uv.lock 锁定。
 
 ```powershell
 uv sync --locked
@@ -38,6 +38,8 @@ $env:AUTOMAS_FILE_ID = '实际文件数字 ID'
 尚无数据站目标文件时，可不设置公开地址，执行 `uv run plugin-index --discover` 生成预览，不会上传。已有文件时必须使用真实公开地址，不能省略它来绕开旧目录读取失败。
 
 ## GitHub Actions 与数据站配置
+
+首次切换到 v2 时，运行 `uv run plugin-index --public-url "" --discover` 全量生成目录，在数据站将生成的 `api/v1/plugins.json` 上传为现有文件的新版本。文件 ID 和公开下载地址沿用原值，后续按原计划定时刷新。
 
 1. 尚未配置公开地址时，先运行一次 `preview`，从 Actions 的 `plugin-catalog` 产物中取出 `api/v1/plugins.json`，用它在数据站创建文件，再取得数字文件 ID 和不带版本参数的固定公开下载地址。首传内容必须是符合协议的插件目录，不能使用其他业务的 JSON 或任意占位文件。
 2. Repository Variables 设置 `AUTOMAS_FILE_ID`、`AUTOMAS_PUBLIC_URL`。

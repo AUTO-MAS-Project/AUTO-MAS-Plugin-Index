@@ -7,7 +7,7 @@ name = "auto-mas-plugin-index"
 version = "0.1.0"
 description = "Generate and publish the AUTO-MAS plugin catalog"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["markdown-it-py>=3", "packaging>=24", "urllib3>=2.2"]
 
 [project.scripts]
 plugin-index = "plugin_index.collect:main"

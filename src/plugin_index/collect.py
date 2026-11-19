@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 
+from .changelog import fetch_markdown, release_notes
 from .http import get_json
 from .metadata import parse_project
 from .protocol import build_catalog, package_key, validate_catalog, write_document
@@ -59,6 +60,7 @@ def collect(
     discover: bool = False,
     get=get_json,
     discovery=discover_packages,
+    fetch_notes=fetch_markdown,
     now: datetime | None = None,
 ) -> tuple[dict, dict]:
     """联合数据站已知包与补录包采集；已知读取失败不发布残缺目录，无变化保留原文档时间。"""
@@ -69,9 +71,10 @@ def collect(
     ):
         raise ValueError("packages config must be a list of nonempty package names")
     configured = {package_key(name) for name in packages}
-    known = (
-        {package_key(item["package_name"]) for item in previous["plugins"]} if previous else set()
-    )
+    prior_entries = {
+        package_key(item["package_name"]): item for item in (previous or {}).get("plugins", [])
+    }
+    known = prior_entries.keys()
     names = configured | known
     if discover:
         names.update(package_key(name) for name in discovery())
@@ -82,11 +85,19 @@ def collect(
             payload = get(f"{PYPI}/pypi/{quote(name, safe='')}/json")
             if not isinstance(payload, dict) or not isinstance(payload.get("info"), dict):
                 raise ValueError("PyPI response missing info")
-            draft = parse_project(payload)
-            if draft is not None and package_key(draft["package_name"]) != name:
+            parsed = parse_project(payload)
+            if parsed is None:
+                if name in known | configured:
+                    raise ValueError("known plugin declaration is invalid")
+                return name, None, None
+            draft, link = parsed
+            if package_key(draft["package_name"]) != name:
                 raise ValueError("PyPI package identity mismatch")
-            if draft is None and name in known | configured:
-                raise ValueError("known plugin declaration is invalid")
+            prior = prior_entries.get(name)
+            history = (
+                prior["changelog"] if prior and prior["plugin_name"] == draft["plugin_name"] else []
+            )
+            draft["changelog"] = release_notes(link, payload, history, fetch=fetch_notes)
             return name, draft, None
         except HTTPError as error:
             if error.code == 404 and name not in configured:
